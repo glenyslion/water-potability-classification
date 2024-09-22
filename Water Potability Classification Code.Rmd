@@ -1,0 +1,294 @@
+---
+title: "Project ERG2050 Water Potability"
+author: ""
+date: "12/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+df <- read.csv("Project\\water_potability.csv")
+head(df)
+```
+```{r}
+str(df)
+```
+
+```{r}
+dim(df)
+```
+
+```{r}
+colSums(is.na(df))
+```
+
+```{r}
+summary(df)
+```
+
+```{r}
+df$ph[is.na(df$ph) & df$Potability == 0] <- mean(df$ph[df$Potability == 0], na.rm=TRUE)
+df$ph[is.na(df$ph)] <- mean(df$ph[df$Potability == 1], na.rm=TRUE)
+df$Sulfate[is.na(df$Sulfate) & df$Potability == 0] <- mean(df$Sulfate[df$Potability == 0], na.rm=TRUE)
+df$Sulfate[is.na(df$Sulfate)] <- mean(df$Sulfate[df$Potability == 1], na.rm=TRUE)
+df$Trihalomethanes[is.na(df$Trihalomethanes) & df$Potability == 0] <- mean(df$Trihalomethanes[df$Potability == 0], na.rm=TRUE)
+df$Trihalomethanes[is.na(df$Trihalomethanes)] <- mean(df$Trihalomethanes[df$Potability == 1], na.rm=TRUE)
+```
+
+```{r}
+colSums(is.na(df))
+```
+
+**Data Modelling**
+```{r}
+library(caret)
+set.seed(1)
+data_index <- createDataPartition(df$Potability, p = 0.7, list = FALSE)
+train_data <- df[data_index, ]
+test_data <- df[-data_index, ]
+train_potability <- df[data_index, 10]
+test_potability <- df[-data_index, 10]
+train_attributes <- df[data_index, 1:9]
+test_attributes <- df[-data_index, 1:9]
+```
+
+```{r}
+levels(df$Potability)
+```
+
+```{r}
+library(dplyr)
+train_data <- train_data %>% mutate(Potability = as.factor(Potability))
+test_data <- test_data %>% mutate(Potability = as.factor(Potability))
+```
+
+```{r}
+levels(train_data$Potability)
+levels(test_data$Potability)
+```
+
+KNN
+```{r}
+library(class)
+set.seed(1)
+x <- 1:50
+acc_knn <- rep(0,50)
+for (i in x){
+  knn_pred <- knn(train_data, train_data, train_potability, k = i)
+  conf_matrix <- table(knn_pred, train_potability)
+  acc_knn[i] <- (conf_matrix[1,1] + conf_matrix[2,2])/sum(conf_matrix)
+}
+plot(x,acc_knn, type = "l")
+```
+
+```{r}
+acc_knn
+```
+
+```{r}
+best_k <- 3
+knn_pred <- knn(train_data, test_data, train_potability, k = best_k)
+table_knn <- table(knn_pred, test_potability)
+(accuracy_knn <- sum(diag(table_knn))/sum(table_knn))
+```
+
+2. Logistic Regression
+```{r}
+library(boot)
+log_model <- glm(Potability ~ ., data = train_data, family = binomial)
+summary(log_model)
+```
+
+```{r}
+probabilities <- predict(log_model, test_data, type = "response")
+predict <- rep(1, length(probabilities))
+predict[probabilities < 0.5] <- 0
+mean(predict == test_potability)
+table(test_potability, predict)
+```
+
+Tuned Parameter of logistic regression (choose p-value < 0.15)
+```{r}
+log_model_tune <- glm(Potability ~ Solids + Organic_carbon, 
+                      data = train_data, family = binomial)
+probabilities <- predict(log_model_tune, test_data, type = "response")
+predict <- rep(1, length(probabilities))
+predict[probabilities < 0.5] <- 0
+mean(predict == test_potability)
+table(test_potability, predict)
+```
+Naive Bayes
+```{r}
+library(e1071)
+naive_model <- naiveBayes(Potability ~ ., data = train_data)
+naive_predict <- predict(naive_model, newdata = test_data)
+mean(naive_predict == test_potability)
+table(test_potability, naive_predict)
+```
+LDA
+```{r}
+set.seed(1)
+lda_model <- lda(Potability ~., data = train_data)
+lda_pred <- predict(lda_model, test_data)
+lda_matrix <- table(lda_pred$class, test_potability)
+lda_matrix
+(lda_matrix[1,1] + lda_matrix[2,2])/sum(lda_matrix)
+```
+QDA
+```{r}
+set.seed(1)
+qda_model <- qda(Potability ~., data = train_data)
+qda_pred <- predict(qda_model, test_data)
+qda_matrix <- table(qda_pred$class, test_potability)
+qda_matrix
+(qda_matrix[1,1] + qda_matrix[2,2])/sum(qda_matrix)
+```
+
+```{r}
+qda_parameter_tune <- qda(Potability~ ph + Hardness + Chloramines + Solids + 
+                            Organic_carbon, data = train_data)
+qda_pred <- predict(qda_parameter_tune, test_data)$class
+qda_tune_matrix <- table(qda_pred, test_potability)
+qda_tune_matrix
+(qda_tune_matrix[1,1]+qda_tune_matrix[2,2])/sum(qda_tune_matrix)
+```
+
+Tree
+```{r}
+library(rpart)
+library(rpart.plot)
+set.seed(1)
+tree_model <- rpart(formula = Potability ~., data = train_data, method = "class",
+                    control = rpart.control(cp = 0))
+rpart.plot(tree_model)
+```
+
+```{r}
+predict_tree_beforePrune <- rpart.predict(tree_model, test_data, type = "class")
+table_mat_beforePrune <- table(test_data$Potability, predict_tree_beforePrune)
+accuracy_Test_beforePrune <- sum(diag(table_mat_beforePrune)) / sum(table_mat_beforePrune)
+cat("Accuracy before prune: ", accuracy_Test_beforePrune)
+```
+
+```{r}
+set.seed(1)
+pruned_tree <- prune(tree_model, cp = tree_model$cptable
+                     [which.min(tree_model$cptable[,"xerror"]),"CP"])
+rpart.plot(pruned_tree)
+```
+
+```{r}
+predict_tree <- rpart.predict(pruned_tree, test_data, type = "class")
+table_mat<- table(test_data$Potability, predict_tree)
+table_mat
+accuracy_Test <- sum(diag(table_mat)) / sum(table_mat)
+cat("Accuracy after prune: ", accuracy_Test)
+```
+SVM
+```{r}
+svm_model <- svm(Potability~., data = train_data, cost = 1,
+                 kernel = "linear", scale= TRUE)
+summary(svm_model)
+```
+
+```{r}
+pred_svm <- predict(svm_model, test_data)
+svm_matrix <- table(test_data$Potability, pred_svm)
+svm_matrix
+(svm_matrix[1,1]+svm_matrix[2,2])/sum(svm_matrix)
+```
+
+```{r}
+svm_tune <- tune(svm, Potability~., data = train_data, kernel = "linear",
+                 ranges = list(cost = 10^seq(-2,1, by=0.25)), scale= TRUE)
+summary(svm_tune)
+```
+
+```{r}
+svm_after_tuned <- svm(Potability~., data = train_data, kernel = "linear", 
+                         cost = svm_tune$best.parameters$cost)
+pred <- predict(svm_after_tuned, test_data)
+svm_tune_matrix<- table(test_data$Potability, pred)
+(svm_tune_matrix[1,1]+svm_tune_matrix[2,2])/sum(svm_tune_matrix)
+```
+
+```{r}
+svm_model_polynomial <- svm(Potability~., data = train_data, cost = 1,
+                 kernel = "polynomial", scale= TRUE)
+summary(svm_model)
+```
+```{r}
+svm_model_radial <- svm(Potability~., data = train_data, cost = 1,
+                 kernel = "radial", scale= TRUE)
+summary(svm_model_radial)
+```
+
+```{r}
+svm_tune_radial <- tune(svm, Potability~., data = train_data, kernel = "radial",
+                 ranges = list(cost = 10^seq(-2,1, by=0.25)), scale= TRUE)
+summary(svm_tune_radial)
+```
+
+```{r}
+svm_after_tuned_radial <- svm(Potability~., data = train_data, kernel = "radial", 
+                         cost = svm_tune_radial$best.parameters$cost)
+pred _radial<- predict(svm_after_tuned, test_data)
+radial_matrix <- table(test_data$Potability, pred)
+(radial_matrix[1,1]+radial_matrix[2,2])/sum(radial_matrix)
+```
+
+```{r}
+svm_model_polynomial <- svm(Potability~., data = train_data, cost = 1,
+                 kernel = "polynomial", scale= TRUE)
+summary(svm_model)
+```
+
+```{r}
+svm_tune <- tune(svm, Potability~., data = train_data, kernel = "polynomial",
+                 ranges = list(cost = 10^seq(-2,1, by=0.25)), scale= TRUE)
+summary(svm_tune)
+```
+
+```{r}
+svm_after_tuned <- svm(Potability~., data = train_data, kernel = "polynomial", 
+                         cost = svm_tune$best.parameters$cost)
+pred <- predict(svm_after_tuned, test_data)
+poly_matrix <- table(test_data$Potability, pred)
+poly_matrix
+(poly_matrix[1,1]+poly_matrix[2,2])/sum(poly_matrix)
+```
+
+Random Forest without tuning
+```{r}
+set.seed(2)
+library(randomForest)
+rf <- randomForest(Potability~., data = train_data)
+pred_rf <- predict(rf, test_data)
+rf_matrix <- table(test_data$Potability, pred_rf)
+rf_matrix
+(rf_matrix[1,1]+rf_matrix[2,2])/sum(rf_matrix)
+```
+
+Bagging
+```{r}
+set.seed(2)
+n_pred <- ncol(df)-1
+bag_model <- randomForest(Potability~., data = train_data, mtry = n_pred, importance = TRUE)
+pred_bag <- predict(bag_model, test_data)
+bag_matrix <- table(test_data$Potability, pred_bag)
+bag_matrix
+(bag_matrix[1,1]+bag_matrix[2,2])/sum(bag_matrix)
+```
+
+Boosting
+```{r}
+set.seed(2)
+boosting <- train(Potability~., data = train_data, method = "gbm", verbose = FALSE)
+pred_boost <- predict(boosting, test_data)
+boost_matrix <- table(test_data$Potability, pred_boost)
+boost_matrix
+(boost_matrix[1,1]+boost_matrix[2,2])/sum(boost_matrix)
+```
